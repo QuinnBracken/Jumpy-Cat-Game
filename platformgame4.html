@@ -1,0 +1,568 @@
+<!DOCTYPE html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Cool Thing</title>
+        <style>
+            * { margin: 0; padding: 0; box-sizing: border-box; }
+            body {
+                background: #69a3ba;
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+                justify-content: center;
+                height: 100vh;
+                
+                overflow: hidden;
+            }
+            canvas {
+                border: 3px solid #000000;
+                border-radius: 8px;
+                image-rendering: pixelated;
+                image-rendering: crisp-edges;
+                background: #ffffff;
+            }
+            .score-bar {
+                color: #000000;
+                font-size: 14px;
+                margin-top: 10px;
+                letter-spacing: 1px;
+            }
+            h1 {
+                color: #f9f9f9;
+                font-size: 28px;
+                margin-bottom: 8px;
+                text-shadow: 2px 2px 0 #000000;
+                letter-spacing: 3px;
+            }
+            .controls-hint {
+                color: #000000;
+                font-size: 13px;
+                margin-bottom: 12px;
+                letter-spacing: 1px;
+            }
+            .controls-hint span {
+                color: #000000;
+                background: #ffffff;
+                padding: 2px 7px;
+                border-radius: 4px;
+                border: 1px solid #3a3a5e;
+            }
+        </style>
+    </head>
+    
+    <body>
+        <h1>Jumpy Cat</h1>
+        <p class="controls-hint"><span>W/A/S/D</span> to move &nbsp; <span>Space</span> to jump</p>
+        <canvas id="game" width="1000" height="460"></canvas>
+        <p class="score-bar" id="scoreBar">Things jumped on: 0</p>
+
+        <script>
+            const canvas = document.getElementById('game');
+            const ctx = canvas.getContext('2d');
+            const scoreBar = document.getElementById('scoreBar');
+
+            const CANVAS_W = canvas.width;   // 1000
+            const CANVAS_H = canvas.height;  // 460
+
+            function spawnParticles() {}
+            function updateParticles() {}
+
+            // Backgrounds
+            const bgImage1 = new Image();
+            bgImage1.src = 'Assets/Background_Test_1.png';
+            const bgImage2 = new Image();
+            bgImage2.src = 'Assets/Sky_2.png';  
+            const bgImage3 = new Image();
+            bgImage3.src = 'Assets/Sky_3.png';  
+            const bgImage4 = new Image();
+            bgImage4.src = 'Assets/Sky_4.png'; 
+            const bgImage5 = new Image();
+            bgImage5.src = 'Assets/Sky_5.png'; 
+
+            // Ground grass
+            const groundImage = new Image();
+            groundImage.src = 'Assets/Grass_Extended.png';  
+            
+            // Box
+            const boxImage = new Image();
+            boxImage.src = 'Assets/platform_1.png';
+
+            //Cloud
+            const cloudImage = new Image();
+            cloudImage.src = 'Assets/cloud2.png';  
+
+            // Asteroid
+            const asteroidImage = new Image();
+            asteroidImage.src = 'Assets/Astroid.png';  
+            
+            // Animation frames
+            const catIdleFrames = [
+                loadImg('Assets/cat_sit.png'), 
+                //loadImg('Assets/cat_loaf.png'),  
+            ];
+            const catRunFrames = [
+                loadImg('Assets/cat_walk_1.png'), 
+                loadImg('Assets/cat_stand.png'),  
+                loadImg('Assets/cat_walk_2.png'),   
+                loadImg('Assets/cat_stand.png'),  
+            ];
+            const catJumpFrames = [
+                loadImg('Assets/cat_jump_1.png'),
+                loadImg('Assets/cat_jump_2.png'),
+                loadImg('Assets/cat_jump_3.png'),
+                loadImg('Assets/cat_jump_4.png'),
+                loadImg('Assets/cat_jump_5.png'),
+                loadImg('Assets/cat_jump_6.png'),
+            ];
+            
+            function loadImg(src) {
+                const img = new Image();
+                img.src = src;
+                return img;
+            }
+            
+            // Animation speed
+            const TICKS_PER_FRAME = 8;
+
+            // Cat sprite 
+            const SPRITE_W = 64;
+            const SPRITE_H = 64;
+            const HB_W = 44;
+            const HB_H = 44;
+            const HB_OFFSET_X = 10;
+            const HB_OFFSET_Y = 6;
+
+
+            // Object types
+            //   image       — the Image object to draw
+            //   srcBounds   — {x, y, w, h} of visible content within the PNG
+            //   srcSize     — full PNG width (assumes square; adjust if not)
+            //   hitH        — collision height (thin strip at top of object)
+            //   fallback    — fallback color if image hasn't loaded yet
+            const objectTypes = {
+                box: {
+                    image: boxImage,
+                    srcBounds: { x: 23, y: 56, w: 83, h: 52 },
+                    srcSize: 120,       // platform_1.png is 120×120
+                    hitH: 16,
+                    fallbackColor: '#c49a6c',
+                    fallbackStroke: '#8b6914',
+                },
+                cloud: {
+                    image: cloudImage,
+                    srcBounds: { x: 23, y: 56, w: 83, h: 52 },
+                    srcSize: 120,
+                    hitH: 16,
+                    fallbackColor: '#7caabb',
+                    fallbackStroke: '#4a7a8b',
+                },
+                asteroid: {
+                    image: asteroidImage,
+                    srcBounds: { x: 0, y: 0, w: 64, h: 64 },
+                    srcSize: 64,
+                    hitH: 16,
+                    fallbackColor: '#7caabb',
+                    fallbackStroke: '#4a7a8b',
+                },
+            };
+
+
+            // Levels
+            const GROUND_Y = 430;
+
+            const levels = [
+                {
+                    name: 'Level 1 — Ground',
+                    bgImage: bgImage1,
+                    yBottom: GROUND_Y,      // starts at ground
+                    yTop: -500,             // extends 930px upward
+                    platforms: [
+                        { x: 530, y: 377, w: 100, type: 'box' },
+                        { x: 331, y: 262, w: 90, type: 'box' },
+                        { x: 572, y: 190, w: 110, type: 'box' },
+                        { x: 745, y: 78, w: 85, type: 'box' },
+                        { x: 378, y: 24, w: 100, type: 'box' },
+                        { x: 576, y: -34, w: 90, type: 'box' },
+                        { x: 103, y: -28, w: 95, type: 'box' },
+                        { x: 237, y: -249, w: 100, type: 'box' },
+                        { x: 462, y: -172, w: 85, type: 'box' },
+                        { x: 561, y: -305, w: 110, type: 'box' },
+                        { x: 462, y: -443, w: 90, type: 'box' },
+                    ],
+                },
+                {
+                    name: 'Level 2 — Sky',
+                    bgImage: bgImage2,
+                    yBottom: -500,
+                    yTop: -1500,
+                    platforms: [
+                        { x: 517, y: -570, w: 100, type: 'box' },
+                        { x: 297, y: -612, w: 110, type: 'cloud' },
+                        { x: 587, y: -855, w: 90, type: 'box' },
+                        { x: 390, y: -749, w: 100, type: 'cloud' },
+                        { x: 159, y: -827, w: 85, type: 'box' },
+                        { x: 442, y: -976, w: 100, type: 'cloud' },
+                        { x: 320, y: -1125, w: 110, type: 'box' },
+                        { x: 156, y: -1222, w: 90, type: 'cloud' },
+                        { x: 560, y: -1177, w: 100, type: 'cloud' },
+                        { x: 756, y: -1008, w: 95, type: 'cloud' },
+                        { x: 446, y: -1313, w: 100, type: 'cloud' },
+                    ],
+                                },
+                {
+                    name: 'Level 3 — Up in the Clouds',
+                    bgImage: bgImage3,
+                    yBottom: -1500,
+                    yTop: -2500,
+                    platforms: [
+                        { x: 325, y: -1424, w: 100, type: 'cloud' },
+                        { x: 490, y: -1544, w: 90, type: 'cloud' },
+                        { x: 590, y: -1669, w: 110, type: 'cloud' },
+                        { x: 258, y: -1658, w: 85, type: 'cloud' },
+                        { x: 468, y: -1803, w: 100, type: 'cloud' },
+                        { x: 712, y: -1868, w: 95, type: 'cloud' },
+                        { x: 579, y: -1969, w: 90, type: 'cloud' },
+                        { x: 160, y: -1975, w: 110, type: 'cloud' },
+                        { x: 445, y: -2096, w: 100, type: 'cloud' },
+                        { x: 82, y: -2104, w: 100, type: 'cloud' },
+                        { x: 82, y: -2104, w: 100, type: 'cloud' },
+                        {  x: 213, y: -2229, w: 100, type: 'cloud' },
+                        { x: 744, y: -2292, w: 100, type: 'cloud' },
+                        { x: 426, y: -2347, w: 100, type: 'cloud' },
+                        { x: 542, y: -2467, w: 100, type: 'cloud' },
+                        { x: 116, y: -2482, w: 100, type: 'cloud' },
+                    ],
+                },
+                
+                {
+                    name: 'Level 4 — Space?',
+                    bgImage: bgImage4,
+                    yBottom: -2500,
+                    yTop: -3500,
+                    platforms: [
+                        { x: 429, y: -2591, w: 100, type: 'cloud' },
+                        { x: 587, y: -2707, w: 100, type: 'cloud' },
+                        { x: 66, y: -2770, w: 100, type: 'cloud' },
+                        { x: 729, y: -2977, w: 100, type: 'cloud' },
+                        { x: 505, y: -2920, w: 100, type: 'cloud' },
+                        { x: 327, y: -2758, w: 100, type: 'cloud' },
+                        { x: 248, y: -2872, w: 100, type: 'cloud' },
+                        { x: 653, y: -3098, w: 100, type: 'asteroid' },
+                        { x: 456, y: -3186, w: 100, type: 'cloud' },
+                        { x: 174, y: -3095, w: 100, type: 'cloud' },
+                        { x: 618, y: -3346, w: 100, type: 'asteroid' },
+                        { x: 322, y: -3281, w: 100, type: 'cloud' },
+                        { x: 399, y: -3441, w: 100, type: 'asteroid' },
+                        { x: 744, y: -3424, w: 100, type: 'cloud' },
+                        { x: 93, y: -3419, w: 100, type: 'asteroid' },
+                    ],
+                },
+            ];
+
+
+            // Build platforms
+            const platforms = [];
+
+            function buildPlatformsFromLevels() {
+                platforms.length = 0;  // clear
+                levels.forEach(level => {
+                    level.platforms.forEach(p => {
+                        const typeInfo = objectTypes[p.type] || objectTypes.box;
+                        platforms.push({
+                            x: p.x,
+                            y: p.y,
+                            w: p.w,
+                            h: typeInfo.hitH,   // collision height from object type
+                            type: p.type,       // store type for drawing
+                            touched: false,
+                        });
+                    });
+                });
+            }
+            buildPlatformsFromLevels();
+
+            /* 
+            const PLAT_MIN_W = 80;
+            const PLAT_MAX_W = 150;
+            const PLAT_HIT_H = 16;
+            const PLAT_VERTICAL_GAP_MIN = 90;
+            const PLAT_VERTICAL_GAP_MAX = 140;
+            const PLAT_MARGIN = 40;
+            let highestPlatformY = GROUND_Y;
+            function generatePlatformsUpTo(targetY) { ... }
+            platforms.push({ x: cat.x - 20, y: GROUND_Y - 100, ... });
+            generatePlatformsUpTo(highestPlatformY - CANVAS_H * 2);
+            function pruneOldPlatforms() { ... }
+            */
+
+
+            // Cat / Player
+            const cat = {
+                x: 480, y: GROUND_Y - HB_H,
+                vx: 0, vy: 0,
+                w: HB_W, h: HB_H,
+                onGround: false,
+                facing: 1, // 1 = right, -1 = left
+                state: 'idle', // idle, run, jump
+                frame: 0,
+            };
+
+            // Physics constants
+            const GRAVITY = 0.8;
+            const JUMP_FORCE = -16;
+            const MOVE_SPEED = 5;
+            const FRICTION = 0.73;
+
+
+            // Loop detection (NOT CURRENTLY WORKING)
+            const WORLD_TOP = levels[levels.length - 1].yTop;
+
+            function checkLoopBack() {
+                if (cat.y < WORLD_TOP) {
+                    // Teleport cat back to ground
+                    cat.x = 480;
+                    cat.y = GROUND_Y - HB_H;
+                    cat.vx = 0;
+                    cat.vy = 0;
+                    cat.onGround = false;
+                    cat.state = 'idle';
+                    cat.frame = 0;
+                    // Reset camera
+                    camera.y = GROUND_Y - CANVAS_H + 60;
+                    // Reset all platforms to untouched
+                    platforms.forEach(p => p.touched = false);
+                    //  increment loop counter here?
+                }
+            }
+
+
+            // Input
+            const keys = {};
+            window.addEventListener('keydown', e => {
+            keys[e.key.toLowerCase()] = true;
+            if(e.key === ' ') e.preventDefault();
+            });
+            window.addEventListener('keyup', e => {
+            keys[e.key.toLowerCase()] = false;
+            });
+
+            // Camera 
+            const camera = { y: GROUND_Y - CANVAS_H + 60 };
+
+            // Score 
+            let score = 0;
+
+            // Game loop
+            let globalFrame = 0;
+
+            function update() {
+            // Input
+            let moving = false;
+            if(keys['a'] || keys['arrowleft']) { cat.vx -= MOVE_SPEED * 0.3; cat.facing = -1; moving = true; }
+            if(keys['d'] || keys['arrowright']) { cat.vx += MOVE_SPEED * 0.3; cat.facing = 1; moving = true; }
+            if((keys['w'] || keys['arrowup'] || keys[' ']) && cat.onGround) {
+                cat.vy = JUMP_FORCE;
+                cat.onGround = false;
+                spawnParticles(cat.x + cat.w/2, cat.y + cat.h, 6, '#fce4b8');
+            }
+            // Soft down (crouch feel)
+            if(keys['s'] || keys['arrowdown']) {
+                if(!cat.onGround) cat.vy += 0.5;
+            }
+
+            // Physics
+            cat.vx *= FRICTION;
+            cat.vy += GRAVITY;
+            cat.x += cat.vx;
+            cat.y += cat.vy;
+
+            // Clamp speed
+            if(Math.abs(cat.vx) < 0.1) cat.vx = 0;
+
+            if (cat.x < 0) { cat.x = 0; cat.vx = 0; }
+            if (cat.x + cat.w > CANVAS_W) { cat.x = CANVAS_W - cat.w; cat.vx = 0; }
+
+            // Ground collision
+            cat.onGround = false;
+            if(cat.y + cat.h >= GROUND_Y) {
+                cat.y = GROUND_Y - cat.h;
+                cat.vy = 0;
+                cat.onGround = true;
+            }
+
+            // Platform collision
+            platforms.forEach(plat => {
+                const prevBottom = cat.y + cat.h - cat.vy;
+                if(
+                cat.x + cat.w > plat.x &&
+                cat.x < plat.x + plat.w &&
+                cat.y + cat.h >= plat.y &&
+                cat.y + cat.h <= plat.y + plat.h + 4 &&
+                cat.vy >= 0 &&
+                prevBottom <= plat.y + 2
+                ) {
+                cat.y = plat.y - cat.h;
+                cat.vy = 0;
+                cat.onGround = true;
+                if(!plat.touched) {
+                    plat.touched = true;
+                    score++;
+                    scoreBar.textContent = `Things jumped on: ${score}`;
+                    spawnParticles(cat.x + cat.w/2, cat.y + cat.h, 10, '#ffb7c5');
+                }
+                }
+            });
+
+            // State
+            if(!cat.onGround) {
+                cat.state = 'jump';
+            } else if(Math.abs(cat.vx) > 0.5 || moving) {
+                cat.state = 'run';
+            } else {
+                cat.state = 'idle';
+            }
+
+            cat.frame++;
+
+            // Camera
+            const targetCY = cat.y - CANVAS_H * 0.35;
+            camera.y += (targetCY - camera.y) * 0.08;
+
+
+            checkLoopBack();
+
+            updateParticles();
+            }
+
+            function draw() {
+            ctx.clearRect(0, 0, CANVAS_W, CANVAS_H);
+            const cameraCenterY = camera.y + CANVAS_H / 2;
+
+            // 'Tiling' backgrounds?
+            levels.forEach(level => {
+
+                const bg = level.bgImage;
+
+                if (!bg.complete || bg.naturalWidth === 0) return;
+
+                // Screen-space position
+                const x = 0;
+                const y = level.yTop - camera.y;
+
+                const w = CANVAS_W;
+
+                // Stretch image to fit level height
+                const h = level.yBottom - level.yTop;
+
+                // Skip if off screen
+                if (y > CANVAS_H || y + h < 0) return;
+
+                ctx.drawImage(
+                    bg,
+                    x,
+                    y,
+                    w,
+                    h
+                );
+
+            });
+
+
+            // Ground 
+            const groundScreenY = GROUND_Y - camera.y;
+            if (groundScreenY < CANVAS_H + 100) {
+                if (groundImage.complete && groundImage.naturalWidth > 0) {
+                    ctx.drawImage(groundImage,
+                        0, 360, 1000, 100,
+                        0, groundScreenY, CANVAS_W, 260
+                    );
+                } else {
+                    ctx.fillStyle = '#3a7a32';
+                    ctx.fillRect(0, groundScreenY, CANVAS_W, 100);
+                }
+            }
+
+            // Platforms draw
+            platforms.forEach(plat => {
+                const screenX = plat.x;
+                const screenY = plat.y - camera.y;
+                // Only draw if on screen
+                if (screenY > -100 && screenY < CANVAS_H + 20) {
+                    const typeInfo = objectTypes[plat.type] || objectTypes.box;
+                    const platImg = typeInfo.image;
+
+                    if (platImg.complete && platImg.naturalWidth > 0) {
+                        const sb = typeInfo.srcBounds;
+                        const ss = typeInfo.srcSize;
+                        const scale = plat.w / sb.w;
+                        const fullDrawW = ss * scale;
+                        const fullDrawH = ss * scale;
+                        const drawX = screenX - (sb.x * scale);
+                        const drawY = screenY - (sb.y * scale);
+                        ctx.drawImage(platImg, drawX, drawY, fullDrawW, fullDrawH);
+                    } else {
+                        // Fallback colored rectangle
+                        ctx.fillStyle = typeInfo.fallbackColor;
+                        ctx.fillRect(screenX, screenY, plat.w, plat.h);
+                        ctx.strokeStyle = typeInfo.fallbackStroke;
+                        ctx.strokeRect(screenX, screenY, plat.w, plat.h);
+                    }
+                }
+            });
+
+
+            // Pick the right animation array based on cat.state
+            let frames;
+            if(cat.state === 'jump') frames = catJumpFrames;
+            else if(cat.state === 'run') frames = catRunFrames;
+            else frames = catIdleFrames;
+            
+            // Cycle through frames
+            const frameIndex = Math.floor(cat.frame / TICKS_PER_FRAME) % frames.length;
+            const img = frames[frameIndex];
+            
+            const spriteScreenX = cat.x - HB_OFFSET_X;
+            const spriteScreenY = (cat.y - HB_OFFSET_Y) - camera.y;
+            
+            //cat drawing
+            ctx.save();
+            if(cat.facing === -1) {
+               ctx.translate(spriteScreenX + SPRITE_W, spriteScreenY);
+               ctx.scale(-1, 1);
+               ctx.drawImage(img, 0, 0, SPRITE_W, SPRITE_H);
+            } else {
+               ctx.drawImage(img, spriteScreenX, spriteScreenY, SPRITE_W, SPRITE_H);
+            }
+            ctx.restore();
+  
+            // Debug: red hitbox outline (comment out) ──
+            //ctx.strokeStyle = 'rgba(255,0,0,0.5)';
+            //ctx.lineWidth = 1;
+            //ctx.strokeRect(cat.x, cat.y - camera.y, cat.w, cat.h);
+
+            // Debug level name display 
+            ctx.fillStyle = 'rgba(255,255,255,0.7)';
+            ctx.font = '14px Courier New';
+            for (let i = 0; i < levels.length; i++) {
+                if (cameraCenterY <= levels[i].yBottom && cameraCenterY > levels[i].yTop) {
+                    ctx.fillText(levels[i].name, 10, 20);
+                    break;
+                }
+            }
+
+            globalFrame++;
+            }
+           
+            function gameLoop() {
+                update();
+                draw();
+                requestAnimationFrame(gameLoop);
+            }
+            
+            gameLoop();
+        </script>
+    </body>
+
+</html>

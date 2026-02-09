@@ -1,0 +1,429 @@
+<!DOCTYPE html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Amazing game something </title>
+        <style>
+            * { margin: 0; padding: 0; box-sizing: border-box; }
+            body {
+                background: #69a3ba;
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+                justify-content: center;
+                height: 100vh;
+                
+                overflow: hidden;
+            }
+            canvas {
+                border: 3px solid #000000;
+                border-radius: 8px;
+                image-rendering: pixelated;
+                image-rendering: crisp-edges;
+                background: #ffffff;
+            }
+            .score-bar {
+                color: #000000;
+                font-size: 14px;
+                margin-top: 10px;
+                letter-spacing: 1px;
+            }
+            h1 {
+                color: #f9f9f9;
+                font-size: 28px;
+                margin-bottom: 8px;
+                text-shadow: 2px 2px 0 #000000;
+                letter-spacing: 3px;
+            }
+            .controls-hint {
+                color: #000000;
+                font-size: 13px;
+                margin-bottom: 12px;
+                letter-spacing: 1px;
+            }
+            .controls-hint span {
+                color: #000000;
+                background: #ffffff;
+                padding: 2px 7px;
+                border-radius: 4px;
+                border: 1px solid #3a3a5e;
+            }
+        </style>
+    </head>
+    
+    <body>
+        <h1>game title here?</h1>
+        <p class="controls-hint"><span>W/A/S/D</span> to move &nbsp; <span>Space</span> to jump</p>
+        <canvas id="game" width="1000" height="460"></canvas>
+        <p class="score-bar" id="scoreBar">Counter thingy here: 0</p>
+
+        <script>
+            const canvas = document.getElementById('game');
+            const ctx = canvas.getContext('2d');
+            const scoreBar = document.getElementById('scoreBar');
+
+            // ── NEW: Canvas size constants ──
+            // (Your draw() was hard-coding 640x400 even though canvas is 1000x460)
+            const CANVAS_W = canvas.width;   // 1000
+            const CANVAS_H = canvas.height;  // 460
+
+            function spawnParticles() {}
+            function updateParticles() {}
+
+            // ── BACKGROUND IMAGE ──
+            const bgImage = new Image();
+            bgImage.src = 'Backg_no_grass.png';
+            
+            // ── GROUND/FLOOR IMAGE ──
+            const groundImage = new Image();
+            groundImage.src = 'Grass.png';  
+            
+            // ── PLATFORM IMAGE ──
+            const boxImage = new Image();
+            boxImage.src = 'platform_1.png';
+            
+            // ── ANIMATION FRAMES ──
+            // Load as individual frames per state:
+            
+            const catIdleFrames = [
+                //loadImg('cat_sit.png'), 
+                loadImg('cat_loaf.png'),  
+            ];
+            const catRunFrames = [
+                loadImg('cat_walk_1.png'), 
+                loadImg('cat_stand.png'),  
+                loadImg('cat_walk_2.png'),   
+                loadImg('cat_stand.png'),  
+            ];
+            const catJumpFrames = [
+                loadImg('cat_jump_1.png'),
+                loadImg('cat_jump_2.png'),
+                loadImg('cat_jump_3.png'),
+                loadImg('cat_jump_4.png'),
+                loadImg('cat_jump_5.png'),
+                loadImg('cat_jump_6.png'),
+            ];
+            
+            function loadImg(src) {
+                const img = new Image();
+                img.src = src;
+                return img;
+            }
+            
+            // ANIMATION SPEED
+            const TICKS_PER_FRAME = 8;
+
+            // ── NEW: Hitbox/sprite separation system ──
+            // Fixes the floating cat. Your cat is ~40x30 visible pixels inside a
+            // 64x64 PNG. These define where the cat body sits within the sprite.
+            const SPRITE_W = 64;       // full PNG width
+            const SPRITE_H = 64;       // full PNG height
+            const HB_OFFSET_X = 12;    // px from left edge of sprite to hitbox start
+            const HB_OFFSET_Y = 24;    // px from top edge of sprite to hitbox start
+            const HB_W = 40;           // hitbox width  (actual cat body)
+            const HB_H = 30;           // hitbox height (actual cat body)
+
+            // ── CHANGED: Platforms ──
+            // Was: static array with all entries commented out
+            // Now: starts empty, filled by generation system below
+            const platforms = [];
+            /*  REMOVED: Old static platforms list:
+            { x: 80, y: 330, w: 60, h: 40, touched: false },
+            { x: 220, y: 300, w: 55, h: 35, touched: false },
+            ... (all 18 entries, were commented out in your version anyway)
+            */
+
+            // ── NEW: Random platform generation constants ──
+            const PLAT_MIN_W = 60;
+            const PLAT_MAX_W = 120;
+            const PLAT_H = 24;
+            const PLAT_VERTICAL_GAP_MIN = 70;
+            const PLAT_VERTICAL_GAP_MAX = 120;
+            const PLAT_MARGIN = 40;
+
+            // Physics constants
+            const GRAVITY = 0.45;
+            const JUMP_FORCE = -9.5;    // ── CHANGED: was -8.5, stronger for higher platforms ──
+            const MOVE_SPEED = 3.0;     // ── CHANGED: was 2.8, slightly faster ──
+            const FRICTION = 0.82;
+            const GROUND_Y = 430;       // ── CHANGED: was 370, moved down to fit 460-tall canvas ──
+
+            // Cat / Player
+            const cat = {
+                // ── CHANGED: x was 100, now 480 (centered on 1000px canvas) ──
+                // ── CHANGED: y was 300, now GROUND_Y - HB_H (placed exactly on ground) ──
+                x: 480, y: GROUND_Y - HB_H,
+                vx: 0, vy: 0,
+                // ── CHANGED: w/h were raw 40/30, now use hitbox constants ──
+                w: HB_W, h: HB_H,
+                onGround: false,
+                facing: 1, // 1 = right, -1 = left
+                state: 'idle', // idle, run, jump
+                frame: 0,
+            };
+
+            // ── NEW: Platform generation functions ──
+            let highestPlatformY = GROUND_Y;
+
+            function generatePlatformsUpTo(targetY) {
+                while (highestPlatformY > targetY) {
+                    const gap = PLAT_VERTICAL_GAP_MIN + Math.random() * (PLAT_VERTICAL_GAP_MAX - PLAT_VERTICAL_GAP_MIN);
+                    highestPlatformY -= gap;
+                    const pw = PLAT_MIN_W + Math.random() * (PLAT_MAX_W - PLAT_MIN_W);
+                    const px = PLAT_MARGIN + Math.random() * (CANVAS_W - pw - PLAT_MARGIN * 2);
+                    platforms.push({
+                        x: px, y: highestPlatformY,
+                        w: pw, h: PLAT_H, touched: false,
+                    });
+                }
+            }
+
+            // NEW: First platform always reachable from ground
+            platforms.push({
+                x: cat.x - 20, y: GROUND_Y - 90,
+                w: 90, h: PLAT_H, touched: false,
+            });
+            highestPlatformY = GROUND_Y - 90;
+            generatePlatformsUpTo(highestPlatformY - CANVAS_H * 2);
+
+            // NEW: Remove platforms that scrolled far below camera
+            function pruneOldPlatforms() {
+                const cutoff = camera.y + CANVAS_H + 200;
+                for (let i = platforms.length - 1; i >= 0; i--) {
+                    if (platforms[i].y > cutoff) platforms.splice(i, 1);
+                }
+            }
+            // ── END OF NEW PLATFORM SYSTEM ──
+
+            // Input
+            const keys = {};
+            window.addEventListener('keydown', e => {
+            keys[e.key.toLowerCase()] = true;
+            if(e.key === ' ') e.preventDefault();
+            });
+            window.addEventListener('keyup', e => {
+            keys[e.key.toLowerCase()] = false;
+            });
+
+            // Camera
+            // ── CHANGED: was { x: 0, y: 0 }. Now Y-only, initialized so ground is visible ──
+            const camera = { y: GROUND_Y - CANVAS_H + 60 };
+
+            // Score 
+            let score = 0;
+
+            // Game loop
+            let globalFrame = 0;
+
+            function update() {
+            // Input
+            let moving = false;
+            if(keys['a'] || keys['arrowleft']) { cat.vx -= MOVE_SPEED * 0.3; cat.facing = -1; moving = true; }
+            if(keys['d'] || keys['arrowright']) { cat.vx += MOVE_SPEED * 0.3; cat.facing = 1; moving = true; }
+            if((keys['w'] || keys['arrowup'] || keys[' ']) && cat.onGround) {
+                cat.vy = JUMP_FORCE;
+                cat.onGround = false;
+                spawnParticles(cat.x + cat.w/2, cat.y + cat.h, 6, '#fce4b8');
+            }
+            // Soft down (crouch feel)
+            if(keys['s'] || keys['arrowdown']) {
+                if(!cat.onGround) cat.vy += 0.5;
+            }
+
+            // Physics
+            cat.vx *= FRICTION;
+            cat.vy += GRAVITY;
+            cat.x += cat.vx;
+            cat.y += cat.vy;
+
+            // Clamp speed
+            if(Math.abs(cat.vx) < 0.1) cat.vx = 0;
+
+            // ── NEW: Clamp cat horizontally to canvas bounds (no horizontal scroll) ──
+            if (cat.x < 0) { cat.x = 0; cat.vx = 0; }
+            if (cat.x + cat.w > CANVAS_W) { cat.x = CANVAS_W - cat.w; cat.vx = 0; }
+
+            // Ground collision
+            cat.onGround = false;
+            if(cat.y + cat.h >= GROUND_Y) {
+                cat.y = GROUND_Y - cat.h;
+                cat.vy = 0;
+                cat.onGround = true;
+            }
+
+            // Platform collision
+            platforms.forEach(plat => {
+                const prevBottom = cat.y + cat.h - cat.vy;
+                if(
+                cat.x + cat.w > plat.x &&
+                cat.x < plat.x + plat.w &&
+                cat.y + cat.h >= plat.y &&
+                cat.y + cat.h <= plat.y + plat.h + 4 &&
+                cat.vy >= 0 &&
+                prevBottom <= plat.y + 2
+                ) {
+                cat.y = plat.y - cat.h;
+                cat.vy = 0;
+                cat.onGround = true;
+                if(!plat.touched) {
+                    plat.touched = true;
+                    score++;
+                    // ── CHANGED: was `${score} / ${platforms.length}` ──
+                    // Removed total since platforms are now infinite
+                    scoreBar.textContent = `Counter thingy here: ${score}`;
+                    spawnParticles(cat.x + cat.w/2, cat.y + cat.h, 10, '#ffb7c5');
+                    if(score === platforms.length) {
+                    //scoreBar.textContent = `🎉 All ${platforms.length} boxes found! You win! 🎉`;
+                    }
+                }
+                }
+            });
+
+            // State
+            if(!cat.onGround) {
+                cat.state = 'jump';
+            } else if(Math.abs(cat.vx) > 0.5 || moving) {
+                cat.state = 'run';
+            } else {
+                cat.state = 'idle';
+            }
+
+            cat.frame++;
+
+            // Camera
+            // ── CHANGED: Was horizontal + vertical:
+            //   const targetCX = cat.x + cat.w/2 - 320;
+            //   const targetCY = Math.min(cat.y - 200, GROUND_Y - 350);
+            //   camera.x += (targetCX - camera.x) * 0.08;
+            //   camera.y += (targetCY - camera.y) * 0.06;
+            // Now: vertical only, puts cat in lower 35% of screen ──
+            const targetCY = cat.y - CANVAS_H * 0.35;
+            camera.y += (targetCY - camera.y) * 0.08;
+
+            // ── NEW: Generate platforms above as camera rises ──
+            generatePlatformsUpTo(camera.y - CANVAS_H);
+
+            // ── NEW: Prune platforms far below ──
+            pruneOldPlatforms();
+
+            updateParticles();
+            }
+
+            function draw() {
+            // ── CHANGED: was ctx.clearRect(0, 0, 640, 400) ──
+            ctx.clearRect(0, 0, CANVAS_W, CANVAS_H);
+
+            // ── CHANGED: Background ──
+            // Was:
+            //   ctx.drawImage(bgImage, 0, 0, 640, 400);
+            //   ctx.drawImage(bgImage, -camera.x * 0.3, -camera.y * 0.2, 1280, 400);
+            // Now: vertical parallax tiling, no camera.x, with image-load fallback ──
+            if (bgImage.complete && bgImage.naturalWidth > 0) {
+                const bgW = CANVAS_W;
+                const bgH = CANVAS_H;
+                const parallaxY = -(camera.y * 0.2);
+                const offsetY = ((parallaxY % bgH) + bgH) % bgH;
+                ctx.drawImage(bgImage, 0, offsetY - bgH, bgW, bgH);
+                ctx.drawImage(bgImage, 0, offsetY, bgW, bgH);
+                ctx.drawImage(bgImage, 0, offsetY + bgH, bgW, bgH);
+            } else {
+                ctx.fillStyle = '#87CEEB';
+                ctx.fillRect(0, 0, CANVAS_W, CANVAS_H);
+            }
+
+            // ── CHANGED: Ground ──
+            // Was: always drawn, tiled horizontally with camera.x offset:
+            //   const gy = GROUND_Y - camera.y;
+            //   for(let x = -((camera.x % groundImage.width)...); x < 640; ...) {
+            //       ctx.drawImage(groundImage, x, gy, groundImage.width, 60);
+            //   }
+            // Now: only drawn when on-screen (disappears as you climb), no camera.x ──
+            const groundScreenY = GROUND_Y - camera.y;
+            if (groundScreenY < CANVAS_H + 60) {
+                if (groundImage.complete && groundImage.naturalWidth > 0) {
+                    const gw = groundImage.naturalWidth || 64;
+                    const gh = 60;
+                    for (let x = 0; x < CANVAS_W; x += gw) {
+                        ctx.drawImage(groundImage, x, groundScreenY, gw, gh);
+                    }
+                } else {
+                    ctx.fillStyle = '#3a7a32';
+                    ctx.fillRect(0, groundScreenY, CANVAS_W, 60);
+                }
+            }
+
+            // Platforms (draws your box image at each platform's position)
+            // ── CHANGED: screenX uses plat.x directly (no camera.x offset) ──
+            // ── NEW: on-screen check and image-load fallback ──
+            platforms.forEach(plat => {
+                const screenX = plat.x;
+                const screenY = plat.y - camera.y;
+                if (screenY > -plat.h && screenY < CANVAS_H) {
+                    if (boxImage.complete && boxImage.naturalWidth > 0) {
+                        ctx.drawImage(boxImage, screenX, screenY, plat.w, plat.h);
+                    } else {
+                        ctx.fillStyle = '#c49a6c';
+                        ctx.fillRect(screenX, screenY, plat.w, plat.h);
+                        ctx.strokeStyle = '#8b6914';
+                        ctx.strokeRect(screenX, screenY, plat.w, plat.h);
+                    }
+                }
+            });
+
+
+            // Pick the right animation array based on cat.state
+            let frames;
+            if(cat.state === 'jump') frames = catJumpFrames;
+            else if(cat.state === 'run') frames = catRunFrames;
+            else frames = catIdleFrames;
+            
+            // Cycle through frames
+            const frameIndex = Math.floor(cat.frame / TICKS_PER_FRAME) % frames.length;
+            const img = frames[frameIndex];
+            
+            // ── CHANGED: Cat screen position calculation ──
+            // Was:
+            //   const drawX = cat.x - camera.x;
+            //   const drawY = cat.y - camera.y;
+            // Now: offsets hitbox position backward by HB_OFFSET to get sprite top-left ──
+            const spriteScreenX = cat.x - HB_OFFSET_X;
+            const spriteScreenY = (cat.y - HB_OFFSET_Y) - camera.y;
+            
+            // ── CHANGED: Cat drawing uses full sprite size ──
+            // Was: ctx.drawImage(img, ..., cat.w, cat.h) which squished 64x64 into 40x30
+            // Now: draws at SPRITE_W x SPRITE_H so image isn't distorted ──
+            ctx.save();
+            if(cat.facing === -1) {
+               // Flip horizontally when facing left
+               // ── CHANGED: was ctx.translate(drawX + cat.w, drawY) ──
+               ctx.translate(spriteScreenX + SPRITE_W, spriteScreenY);
+               ctx.scale(-1, 1);
+               // ── CHANGED: was ctx.drawImage(img, 0, 0, cat.w, cat.h) ──
+               ctx.drawImage(img, 0, 0, SPRITE_W, SPRITE_H);
+            } else {
+               // ── CHANGED: was ctx.drawImage(img, drawX, drawY, cat.w, cat.h) ──
+               ctx.drawImage(img, spriteScreenX, spriteScreenY, SPRITE_W, SPRITE_H);
+            }
+             ctx.restore();
+
+            // ── NEW: Debug hitbox visualizer (uncomment to tune HB_OFFSET values) ──
+            // ctx.strokeStyle = 'red';
+            // ctx.lineWidth = 1;
+            // ctx.strokeRect(cat.x, cat.y - camera.y, cat.w, cat.h);
+  
+
+            globalFrame++;
+            }
+           
+            function gameLoop() {
+                update();
+                draw();
+                requestAnimationFrame(gameLoop);
+            }
+            
+            gameLoop();
+        </script>
+    </body>
+
+</html>
